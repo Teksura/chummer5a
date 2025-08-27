@@ -18,7 +18,6 @@
  */
 
 using System;
-using System.Buffers;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Diagnostics;
@@ -255,24 +254,24 @@ namespace Chummer.Backend.Equipment
             objXmlMod.TryGetStringFieldQuickly("cost", ref _strCost);
             if (!string.IsNullOrEmpty(_strCost) && _strCost.StartsWith("Variable(", StringComparison.Ordinal))
             {
+                string strFirstHalf = _strCost.TrimStartOnce("Variable(", true).TrimEndOnce(')');
+                string strSecondHalf = string.Empty;
+                int intHyphenIndex = strFirstHalf.IndexOf('-');
+                if (intHyphenIndex != -1)
+                {
+                    if (intHyphenIndex + 1 < strFirstHalf.Length)
+                        strSecondHalf = strFirstHalf.Substring(intHyphenIndex + 1);
+                    strFirstHalf = strFirstHalf.Substring(0, intHyphenIndex);
+                }
                 decimal decMin;
                 decimal decMax = decimal.MaxValue;
-                string strCost = _strCost.TrimStartOnce("Variable(", true).TrimEndOnce(')');
-                if (strCost.Contains('-'))
+                if (intHyphenIndex != -1)
                 {
-                    string[] strValues = strCost.SplitFixedSizePooledArray('-', 2);
-                    try
-                    {
-                        decMin = Convert.ToDecimal(strValues[0], GlobalSettings.InvariantCultureInfo);
-                        decMax = Convert.ToDecimal(strValues[1], GlobalSettings.InvariantCultureInfo);
-                    }
-                    finally
-                    {
-                        ArrayPool<string>.Shared.Return(strValues);
-                    }
+                    decimal.TryParse(strFirstHalf, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decMin);
+                    decimal.TryParse(strSecondHalf, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decMax);
                 }
                 else
-                    decMin = Convert.ToDecimal(strCost.FastEscape('+'), GlobalSettings.InvariantCultureInfo);
+                    decimal.TryParse(strFirstHalf.FastEscape('+'), NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decMin);
 
                 if (decMin != 0 || decMax != decimal.MaxValue)
                 {
@@ -548,8 +547,16 @@ namespace Chummer.Backend.Equipment
                         foreach (XmlNode xmlModNode in xmlModList)
                         {
                             VehicleMod objMod = new VehicleMod(_objCharacter);
-                            objMod.Load(xmlModNode, blnCopy);
-                            Mods.Add(objMod);
+                            try
+                            {
+                                objMod.Load(xmlModNode, blnCopy);
+                                Mods.Add(objMod);
+                            }
+                            catch
+                            {
+                                objMod.DeleteVehicleMod();
+                                throw;
+                            }
                         }
                     }
                     else
@@ -557,8 +564,16 @@ namespace Chummer.Backend.Equipment
                         foreach (XmlNode xmlModNode in xmlModList)
                         {
                             VehicleMod objMod = new VehicleMod(_objCharacter);
-                            await objMod.LoadAsync(xmlModNode, blnCopy, token).ConfigureAwait(false);
-                            await Mods.AddAsync(objMod, token).ConfigureAwait(false);
+                            try
+                            {
+                                await objMod.LoadAsync(xmlModNode, blnCopy, token).ConfigureAwait(false);
+                                await Mods.AddAsync(objMod, token).ConfigureAwait(false);
+                            }
+                            catch
+                            {
+                                await objMod.DeleteVehicleModAsync(token: CancellationToken.None).ConfigureAwait(false);
+                                throw;
+                            }
                         }
                     }
                 }
@@ -574,17 +589,25 @@ namespace Chummer.Backend.Equipment
                         foreach (XmlNode xmlWeaponNode in xmlWeaponList)
                         {
                             Weapon objWeapon = new Weapon(_objCharacter);
-                            if (Weapons.Count >= WeaponCapacity)
+                            try
                             {
-                                // Stop loading more weapons than we can actually mount and dump the rest into the character's basic inventory
-                                objWeapon.Load(xmlWeaponNode, blnCopy);
-                                _objCharacter.Weapons.Add(objWeapon);
+                                if (Weapons.Count >= WeaponCapacity)
+                                {
+                                    // Stop loading more weapons than we can actually mount and dump the rest into the character's basic inventory
+                                    objWeapon.Load(xmlWeaponNode, blnCopy);
+                                    _objCharacter.Weapons.Add(objWeapon);
+                                }
+                                else
+                                {
+                                    objWeapon.ParentMount = this;
+                                    objWeapon.Load(xmlWeaponNode, blnCopy);
+                                    Weapons.Add(objWeapon);
+                                }
                             }
-                            else
+                            catch
                             {
-                                objWeapon.ParentMount = this;
-                                objWeapon.Load(xmlWeaponNode, blnCopy);
-                                Weapons.Add(objWeapon);
+                                objWeapon.DeleteWeapon();
+                                throw;
                             }
                         }
                     }
@@ -593,17 +616,25 @@ namespace Chummer.Backend.Equipment
                         foreach (XmlNode xmlWeaponNode in xmlWeaponList)
                         {
                             Weapon objWeapon = new Weapon(_objCharacter);
-                            if (await Weapons.GetCountAsync(token).ConfigureAwait(false) >= WeaponCapacity)
+                            try
                             {
-                                // Stop loading more weapons than we can actually mount and dump the rest into the character's basic inventory
-                                await objWeapon.LoadAsync(xmlWeaponNode, blnCopy, token).ConfigureAwait(false);
-                                await (await _objCharacter.GetWeaponsAsync(token).ConfigureAwait(false)).AddAsync(objWeapon, token).ConfigureAwait(false);
+                                if (await Weapons.GetCountAsync(token).ConfigureAwait(false) >= WeaponCapacity)
+                                {
+                                    // Stop loading more weapons than we can actually mount and dump the rest into the character's basic inventory
+                                    await objWeapon.LoadAsync(xmlWeaponNode, blnCopy, token).ConfigureAwait(false);
+                                    await (await _objCharacter.GetWeaponsAsync(token).ConfigureAwait(false)).AddAsync(objWeapon, token).ConfigureAwait(false);
+                                }
+                                else
+                                {
+                                    await objWeapon.SetParentMountAsync(this, token).ConfigureAwait(false);
+                                    await objWeapon.LoadAsync(xmlWeaponNode, blnCopy, token).ConfigureAwait(false);
+                                    await Weapons.AddAsync(objWeapon, token).ConfigureAwait(false);
+                                }
                             }
-                            else
+                            catch
                             {
-                                await objWeapon.SetParentMountAsync(this, token).ConfigureAwait(false);
-                                await objWeapon.LoadAsync(xmlWeaponNode, blnCopy, token).ConfigureAwait(false);
-                                await Weapons.AddAsync(objWeapon, token).ConfigureAwait(false);
+                                await objWeapon.DeleteWeaponAsync(token: CancellationToken.None).ConfigureAwait(false);
+                                throw;
                             }
                         }
                     }
@@ -678,6 +709,8 @@ namespace Chummer.Backend.Equipment
             await objWriter.WriteElementStringAsync("name_english", Name, token: token).ConfigureAwait(false);
             await objWriter.WriteElementStringAsync("fullname",
                 await DisplayNameAsync(strLanguageToPrint, token).ConfigureAwait(false), token: token).ConfigureAwait(false);
+            await objWriter.WriteElementStringAsync("fullname_english",
+                await DisplayNameAsync(GlobalSettings.DefaultLanguage, token).ConfigureAwait(false), token: token).ConfigureAwait(false);
             await objWriter.WriteElementStringAsync("category", await DisplayCategoryAsync(strLanguageToPrint, token).ConfigureAwait(false), token: token).ConfigureAwait(false);
             await objWriter.WriteElementStringAsync("category_english", Category, token: token).ConfigureAwait(false);
             await objWriter.WriteElementStringAsync("limit", Limit, token: token).ConfigureAwait(false);
@@ -780,13 +813,19 @@ namespace Chummer.Backend.Equipment
                     {
                         foreach (XmlNode xmlModNode in xmlModList)
                         {
-                            VehicleMod objMod = new VehicleMod(_objCharacter)
+                            VehicleMod objMod = new VehicleMod(_objCharacter);
+                            try
                             {
-                                IncludedInVehicle = true
-                            };
-                            xmlDataNode = xmlDoc.TryGetNodeByNameOrId("/chummer/weaponmountmods/mod", xmlModNode.InnerText);
-                            objMod.Load(xmlDataNode);
-                            Mods.Add(objMod);
+                                objMod.IncludedInVehicle = true;
+                                xmlDataNode = xmlDoc.TryGetNodeByNameOrId("/chummer/weaponmountmods/mod", xmlModNode.InnerText);
+                                objMod.Load(xmlDataNode);
+                                Mods.Add(objMod);
+                            }
+                            catch
+                            {
+                                objMod.DeleteVehicleMod();
+                                throw;
+                            }
                         }
                     }
                 }
@@ -864,10 +903,18 @@ namespace Chummer.Backend.Equipment
                         foreach (XmlNode xmlModNode in xmlModList)
                         {
                             VehicleMod objMod = new VehicleMod(_objCharacter);
-                            await objMod.SetIncludedInVehicleAsync(true, token).ConfigureAwait(false);
-                            xmlDataNode = xmlDoc.TryGetNodeByNameOrId("/chummer/weaponmountmods/mod", xmlModNode.InnerText);
-                            await objMod.LoadAsync(xmlDataNode, token: token).ConfigureAwait(false);
-                            await Mods.AddAsync(objMod, token).ConfigureAwait(false);
+                            try
+                            {
+                                await objMod.SetIncludedInVehicleAsync(true, token).ConfigureAwait(false);
+                                xmlDataNode = xmlDoc.TryGetNodeByNameOrId("/chummer/weaponmountmods/mod", xmlModNode.InnerText);
+                                await objMod.LoadAsync(xmlDataNode, token: token).ConfigureAwait(false);
+                                await Mods.AddAsync(objMod, token).ConfigureAwait(false);
+                            }
+                            catch
+                            {
+                                await objMod.DeleteVehicleModAsync(token: CancellationToken.None).ConfigureAwait(false);
+                                throw;
+                            }
                         }
                     }
                 }
@@ -2265,24 +2312,24 @@ namespace Chummer.Backend.Equipment
             _strCost = objXmlMod["cost"]?.InnerText ?? "0";
             if (_strCost.StartsWith("Variable(", StringComparison.Ordinal))
             {
+                string strFirstHalf = _strCost.TrimStartOnce("Variable(", true).TrimEndOnce(')');
+                string strSecondHalf = string.Empty;
+                int intHyphenIndex = strFirstHalf.IndexOf('-');
+                if (intHyphenIndex != -1)
+                {
+                    if (intHyphenIndex + 1 < strFirstHalf.Length)
+                        strSecondHalf = strFirstHalf.Substring(intHyphenIndex + 1);
+                    strFirstHalf = strFirstHalf.Substring(0, intHyphenIndex);
+                }
                 decimal decMin;
                 decimal decMax = decimal.MaxValue;
-                string strCost = _strCost.TrimStartOnce("Variable(", true).TrimEndOnce(')');
-                if (strCost.Contains('-'))
+                if (intHyphenIndex != -1)
                 {
-                    string[] strValues = strCost.SplitFixedSizePooledArray('-', 2);
-                    try
-                    {
-                        decMin = Convert.ToDecimal(strValues[0], GlobalSettings.InvariantCultureInfo);
-                        decMax = Convert.ToDecimal(strValues[1], GlobalSettings.InvariantCultureInfo);
-                    }
-                    finally
-                    {
-                        ArrayPool<string>.Shared.Return(strValues);
-                    }
+                    decimal.TryParse(strFirstHalf, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decMin);
+                    decimal.TryParse(strSecondHalf, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decMax);
                 }
                 else
-                    decMin = Convert.ToDecimal(strCost.FastEscape('+'), GlobalSettings.InvariantCultureInfo);
+                    decimal.TryParse(strFirstHalf.FastEscape('+'), NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decMin);
 
                 if (decMin != 0 || decMax != decimal.MaxValue)
                 {

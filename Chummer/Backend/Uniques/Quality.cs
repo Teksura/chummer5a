@@ -311,18 +311,29 @@ namespace Chummer
                                 }
 
                                 Weapon objGearWeapon = new Weapon(_objCharacter);
-                                if (blnSync)
-                                    // ReSharper disable once MethodHasAsyncOverload
-                                    objGearWeapon.Create(objXmlWeapon, lstWeapons, true, true, true, intAddWeaponRating, token: token);
-                                else
-                                    await objGearWeapon.CreateAsync(objXmlWeapon, lstWeapons, true, true, true, intAddWeaponRating, token: token).ConfigureAwait(false);
-                                objGearWeapon.ParentID = InternalId;
-                                objGearWeapon.Cost = "0";
+                                try
+                                {
+                                    if (blnSync)
+                                        // ReSharper disable once MethodHasAsyncOverload
+                                        objGearWeapon.Create(objXmlWeapon, lstWeapons, true, true, true, intAddWeaponRating, token: token);
+                                    else
+                                        await objGearWeapon.CreateAsync(objXmlWeapon, lstWeapons, true, true, true, intAddWeaponRating, token: token).ConfigureAwait(false);
+                                    objGearWeapon.ParentID = InternalId;
+                                    objGearWeapon.Cost = "0";
 
-                                if (Guid.TryParse(objGearWeapon.InternalId, out _guiWeaponID))
-                                    lstWeapons.Add(objGearWeapon);
-                                else
-                                    _guiWeaponID = Guid.Empty;
+                                    if (Guid.TryParse(objGearWeapon.InternalId, out _guiWeaponID))
+                                        lstWeapons.Add(objGearWeapon);
+                                    else
+                                        _guiWeaponID = Guid.Empty;
+                                }
+                                catch
+                                {
+                                    if (blnSync)
+                                        objGearWeapon.DeleteWeapon();
+                                    else
+                                        await objGearWeapon.DeleteWeaponAsync(token: CancellationToken.None).ConfigureAwait(false);
+                                    throw;
+                                }
                             }
                             else
                             {
@@ -712,6 +723,11 @@ namespace Chummer
                             "name", await DisplayNameShortAsync(strLanguageToPrint, token).ConfigureAwait(false),
                             token: token).ConfigureAwait(false);
                     await objWriter.WriteElementStringAsync("name_english", await GetNameAsync(token).ConfigureAwait(false), token: token).ConfigureAwait(false);
+                    await objWriter
+                        .WriteElementStringAsync(
+                            "fullname", await DisplayNameAsync(objCulture, strLanguageToPrint, token).ConfigureAwait(false),
+                            token: token).ConfigureAwait(false);
+                    await objWriter.WriteElementStringAsync("fullname_english", await DisplayNameAsync(GlobalSettings.InvariantCultureInfo, GlobalSettings.DefaultLanguage, token).ConfigureAwait(false), token: token).ConfigureAwait(false);
                     string strSpace = await LanguageManager
                         .GetStringAsync("String_Space", strLanguageToPrint, token: token)
                         .ConfigureAwait(false);
@@ -2891,7 +2907,7 @@ namespace Chummer
                         }
                         catch
                         {
-                            await objNewQualityLevel.DeleteQualityAsync(token: token).ConfigureAwait(false);
+                            await objNewQualityLevel.DeleteQualityAsync(token: CancellationToken.None).ConfigureAwait(false);
                             throw;
                         }
                     }
@@ -3249,6 +3265,8 @@ namespace Chummer
         /// <returns>Nuyen cost of the actual removal (necessary for removing some stuff that adds qualities as part of their effects).</returns>
         public decimal DeleteQuality(bool blnFullRemoval = false, CancellationToken token = default)
         {
+            if (IsDisposed)
+                return 0;
             try
             {
                 using (LockObject.EnterWriteLock(token))
@@ -3319,6 +3337,8 @@ namespace Chummer
         public async Task<decimal> DeleteQualityAsync(bool blnFullRemoval = false,
                                                            CancellationToken token = default)
         {
+            if (IsDisposed)
+                return 0;
             try
             {
                 IAsyncDisposable objLocker = await LockObject.EnterWriteLockAsync(token).ConfigureAwait(false);
@@ -3405,15 +3425,23 @@ namespace Chummer
             }
         }
 
+        private int _intIsDisposed;
+
+        public bool IsDisposed => _intIsDisposed > 0;
+
         /// <inheritdoc />
         public void Dispose()
         {
+            if (Interlocked.CompareExchange(ref _intIsDisposed, 1, 0) > 0)
+                return;
             // No disposal necessary because our LockObject is our character owner's LockObject
         }
 
         /// <inheritdoc />
         public ValueTask DisposeAsync()
         {
+            if (Interlocked.CompareExchange(ref _intIsDisposed, 1, 0) > 0)
+                return default;
             // No disposal necessary because our LockObject is our character owner's LockObject
             return default;
         }

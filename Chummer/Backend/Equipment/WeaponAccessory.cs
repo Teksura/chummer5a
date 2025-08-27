@@ -18,7 +18,6 @@
  */
 
 using System;
-using System.Buffers;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Diagnostics;
@@ -232,24 +231,24 @@ namespace Chummer.Backend.Equipment
                     _strCost = "0";
                 if (_strCost.StartsWith("Variable(", StringComparison.Ordinal))
                 {
+                    string strFirstHalf = _strCost.TrimStartOnce("Variable(", true).TrimEndOnce(')');
+                    string strSecondHalf = string.Empty;
+                    int intHyphenIndex = strFirstHalf.IndexOf('-');
+                    if (intHyphenIndex != -1)
+                    {
+                        if (intHyphenIndex + 1 < strFirstHalf.Length)
+                            strSecondHalf = strFirstHalf.Substring(intHyphenIndex + 1);
+                        strFirstHalf = strFirstHalf.Substring(0, intHyphenIndex);
+                    }
                     decimal decMin;
                     decimal decMax = decimal.MaxValue;
-                    string strCost = _strCost.TrimStartOnce("Variable(", true).TrimEndOnce(')');
-                    if (strCost.Contains('-'))
+                    if (intHyphenIndex != -1)
                     {
-                        string[] strValues = strCost.SplitFixedSizePooledArray('-', 2);
-                        try
-                        {
-                            decMin = Convert.ToDecimal(strValues[0], GlobalSettings.InvariantCultureInfo);
-                            decMax = Convert.ToDecimal(strValues[1], GlobalSettings.InvariantCultureInfo);
-                        }
-                        finally
-                        {
-                            ArrayPool<string>.Shared.Return(strValues);
-                        }
+                        decimal.TryParse(strFirstHalf, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decMin);
+                        decimal.TryParse(strSecondHalf, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decMax);
                     }
                     else
-                        decMin = Convert.ToDecimal(strCost.FastEscape('+'), GlobalSettings.InvariantCultureInfo);
+                        decimal.TryParse(strFirstHalf.FastEscape('+'), NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decMin);
 
                     if (decMin != 0 || decMax != decimal.MaxValue)
                     {
@@ -427,40 +426,50 @@ namespace Chummer.Backend.Equipment
 
                             XmlNode objXmlGear = objXmlGearDocument.SelectSingleNode(strFilter);
 
-                            Gear objGear = new Gear(_objCharacter);
-
                             List<Weapon> lstWeapons = new List<Weapon>(1);
 
-                            if (blnSync)
+                            Gear objGear = new Gear(_objCharacter);
+                            try
                             {
-                                // ReSharper disable once MethodHasAsyncOverload
-                                objGear.Create(objXmlGear, intGearRating, lstWeapons, strChildForceValue,
-                                    blnAddChildImprovements, blnChildCreateChildren, token: token);
-                                objGear.Quantity = decGearQty;
+                                if (blnSync)
+                                {
+                                    // ReSharper disable once MethodHasAsyncOverload
+                                    objGear.Create(objXmlGear, intGearRating, lstWeapons, strChildForceValue,
+                                        blnAddChildImprovements, blnChildCreateChildren, token: token);
+                                    objGear.Quantity = decGearQty;
+                                }
+                                else
+                                {
+                                    await objGear.CreateAsync(objXmlGear, intGearRating, lstWeapons, strChildForceValue,
+                                            blnAddChildImprovements, blnChildCreateChildren, token: token)
+                                        .ConfigureAwait(false);
+                                    await objGear.SetQuantityAsync(decGearQty, token).ConfigureAwait(false);
+                                }
+
+                                objGear.Cost = "0";
+                                objGear.ParentID = InternalId;
+                                if (!string.IsNullOrEmpty(strChildForceSource))
+                                    objGear.Source = strChildForceSource;
+                                if (!string.IsNullOrEmpty(strChildForcePage))
+                                    objGear.Page = strChildForcePage;
+                                if (blnSync)
+                                    // ReSharper disable once MethodHasAsyncOverloadWithCancellation
+                                    _lstGear.Add(objGear);
+                                else
+                                    await _lstGear.AddAsync(objGear, token).ConfigureAwait(false);
+
+                                // Change the Capacity of the child if necessary.
+                                if (objXmlAccessoryGear["capacity"] != null)
+                                    objGear.Capacity = '[' + objXmlAccessoryGear["capacity"].InnerText + ']';
                             }
-                            else
+                            catch
                             {
-                                await objGear.CreateAsync(objXmlGear, intGearRating, lstWeapons, strChildForceValue,
-                                        blnAddChildImprovements, blnChildCreateChildren, token: token)
-                                    .ConfigureAwait(false);
-                                await objGear.SetQuantityAsync(decGearQty, token).ConfigureAwait(false);
+                                if (blnSync)
+                                    objGear.DeleteGear();
+                                else
+                                    await objGear.DeleteGearAsync(token: CancellationToken.None).ConfigureAwait(false);
+                                throw;
                             }
-
-                            objGear.Cost = "0";
-                            objGear.ParentID = InternalId;
-                            if (!string.IsNullOrEmpty(strChildForceSource))
-                                objGear.Source = strChildForceSource;
-                            if (!string.IsNullOrEmpty(strChildForcePage))
-                                objGear.Page = strChildForcePage;
-                            if (blnSync)
-                                // ReSharper disable once MethodHasAsyncOverloadWithCancellation
-                                _lstGear.Add(objGear);
-                            else
-                                await _lstGear.AddAsync(objGear, token).ConfigureAwait(false);
-
-                            // Change the Capacity of the child if necessary.
-                            if (objXmlAccessoryGear["capacity"] != null)
-                                objGear.Capacity = '[' + objXmlAccessoryGear["capacity"].InnerText + ']';
                         }
                     }
                 }
@@ -681,8 +690,16 @@ namespace Chummer.Backend.Equipment
                             foreach (XmlNode nodChild in nodChildren)
                             {
                                 Gear objGear = new Gear(_objCharacter);
-                                objGear.Load(nodChild, blnCopy);
-                                _lstGear.Add(objGear);
+                                try
+                                {
+                                    objGear.Load(nodChild, blnCopy);
+                                    _lstGear.Add(objGear);
+                                }
+                                catch
+                                {
+                                    objGear.DeleteGear();
+                                    throw;
+                                }
                             }
                         }
                         else
@@ -690,8 +707,16 @@ namespace Chummer.Backend.Equipment
                             foreach (XmlNode nodChild in nodChildren)
                             {
                                 Gear objGear = new Gear(_objCharacter);
-                                await objGear.LoadAsync(nodChild, blnCopy, token).ConfigureAwait(false);
-                                await _lstGear.AddAsync(objGear, token).ConfigureAwait(false);
+                                try
+                                {
+                                    await objGear.LoadAsync(nodChild, blnCopy, token).ConfigureAwait(false);
+                                    await _lstGear.AddAsync(objGear, token).ConfigureAwait(false);
+                                }
+                                catch
+                                {
+                                    await objGear.DeleteGearAsync(token: CancellationToken.None).ConfigureAwait(false);
+                                    throw;
+                                }
                             }
                         }
                     }
@@ -787,8 +812,10 @@ namespace Chummer.Backend.Equipment
             {
                 await objWriter.WriteElementStringAsync("guid", InternalId, token).ConfigureAwait(false);
                 await objWriter.WriteElementStringAsync("sourceid", SourceIDString, token).ConfigureAwait(false);
-                await objWriter.WriteElementStringAsync("name", await DisplayNameAsync(strLanguageToPrint, token).ConfigureAwait(false), token).ConfigureAwait(false);
+                await objWriter.WriteElementStringAsync("name", await DisplayNameShortAsync(strLanguageToPrint, token).ConfigureAwait(false), token).ConfigureAwait(false);
                 await objWriter.WriteElementStringAsync("name_english", Name, token).ConfigureAwait(false);
+                await objWriter.WriteElementStringAsync("fullname", await DisplayNameAsync(strLanguageToPrint, token).ConfigureAwait(false), token).ConfigureAwait(false);
+                await objWriter.WriteElementStringAsync("fullname_english", await DisplayNameAsync(GlobalSettings.DefaultLanguage, token).ConfigureAwait(false), token).ConfigureAwait(false);
                 await objWriter.WriteElementStringAsync("mount", Mount, token).ConfigureAwait(false);
                 await objWriter.WriteElementStringAsync("extramount", ExtraMount, token).ConfigureAwait(false);
                 await objWriter.WriteElementStringAsync("addmount", AddMount, token).ConfigureAwait(false);

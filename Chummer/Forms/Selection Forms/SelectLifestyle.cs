@@ -49,13 +49,10 @@ namespace Chummer
 
         #region Control Events
 
-        public SelectLifestyle(Character objCharacter, Lifestyle objLifestyle, bool blnAdvancedMode = true)
+        public SelectLifestyle(Character objCharacter, Lifestyle objLifestyle)
         {
             _objCharacter = objCharacter ?? throw new ArgumentNullException(nameof(objCharacter));
-            _objLifestyle = objLifestyle ?? new Lifestyle(objCharacter)
-            {
-                StyleType = blnAdvancedMode ? LifestyleType.Advanced : LifestyleType.Standard
-            };
+            _objLifestyle = objLifestyle ?? throw new ArgumentNullException(nameof(objLifestyle));
             InitializeComponent();
             this.UpdateLightDarkMode();
             this.TranslateWinForm();
@@ -797,16 +794,7 @@ namespace Chummer
                     }
                     catch
                     {
-                        try
-                        {
-                            await objQuality.RemoveAsync(false).ConfigureAwait(false);
-                        }
-                        catch
-                        {
-                            await objQuality.DisposeAsync().ConfigureAwait(false);
-                            // Swallow removal exceptions here because we already want to throw an exception
-                        }
-
+                        await objQuality.RemoveAsync(false, CancellationToken.None).ConfigureAwait(false);
                         throw;
                     }
                 }
@@ -1032,7 +1020,8 @@ namespace Chummer
             _objLifestyle.Source = objXmlLifestyle["source"]?.InnerText;
             _objLifestyle.Page = objXmlLifestyle["page"]?.InnerText;
             await _objLifestyle.SetNameAsync(strLifestyleName, token).ConfigureAwait(false);
-            await _objLifestyle.SetCostAsync(Convert.ToDecimal(objXmlLifestyle["cost"]?.InnerText, GlobalSettings.InvariantCultureInfo), token).ConfigureAwait(false);
+            decimal.TryParse(objXmlLifestyle["cost"]?.InnerText, System.Globalization.NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decimal decCost);
+            await _objLifestyle.SetCostAsync(decCost, token).ConfigureAwait(false);
             await _objLifestyle.SetPercentageAsync(await nudPercentage.DoThreadSafeFuncAsync(x => x.Value, token).ConfigureAwait(false), token).ConfigureAwait(false);
             await _objLifestyle.SetBaseLifestyleAsync(strBaseLifestyle, token).ConfigureAwait(false);
             if (await _objLifestyle.GetStyleTypeAsync(token).ConfigureAwait(false) != LifestyleType.Standard)
@@ -1059,7 +1048,8 @@ namespace Chummer
             // Get the starting Nuyen information.
             if (int.TryParse(objXmlLifestyle["dice"]?.InnerText, System.Globalization.NumberStyles.Integer, GlobalSettings.InvariantCultureInfo, out int intDice))
                 await _objLifestyle.SetDiceAsync(intDice, token).ConfigureAwait(false);
-            await _objLifestyle.SetMultiplierAsync(Convert.ToDecimal(objXmlLifestyle["multiplier"]?.InnerText, GlobalSettings.InvariantCultureInfo), token).ConfigureAwait(false);
+            decimal.TryParse(objXmlLifestyle["multiplier"]?.InnerText, System.Globalization.NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decimal decMultiplier);
+            await _objLifestyle.SetMultiplierAsync(decMultiplier, token).ConfigureAwait(false);
             SelectedLifestyle = _objLifestyle;
             await this.DoThreadSafeAsync(x =>
             {

@@ -267,24 +267,24 @@ namespace Chummer.Backend.Equipment
             // Check for a Variable Cost.
             if (_strCost.StartsWith("Variable(", StringComparison.Ordinal))
             {
+                string strFirstHalf = _strCost.TrimStartOnce("Variable(", true).TrimEndOnce(')');
+                string strSecondHalf = string.Empty;
+                int intHyphenIndex = strFirstHalf.IndexOf('-');
+                if (intHyphenIndex != -1)
+                {
+                    if (intHyphenIndex + 1 < strFirstHalf.Length)
+                        strSecondHalf = strFirstHalf.Substring(intHyphenIndex + 1);
+                    strFirstHalf = strFirstHalf.Substring(0, intHyphenIndex);
+                }
                 decimal decMin;
                 decimal decMax = decimal.MaxValue;
-                string strCost = _strCost.TrimStartOnce("Variable(", true).TrimEndOnce(')');
-                if (strCost.Contains('-'))
+                if (intHyphenIndex != -1)
                 {
-                    string[] strValues = strCost.SplitFixedSizePooledArray('-', 2);
-                    try
-                    {
-                        decMin = Convert.ToDecimal(strValues[0], GlobalSettings.InvariantCultureInfo);
-                        decMax = Convert.ToDecimal(strValues[1], GlobalSettings.InvariantCultureInfo);
-                    }
-                    finally
-                    {
-                        ArrayPool<string>.Shared.Return(strValues);
-                    }
+                    decimal.TryParse(strFirstHalf, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decMin);
+                    decimal.TryParse(strSecondHalf, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decMax);
                 }
                 else
-                    decMin = Convert.ToDecimal(strCost.FastEscape('+'), GlobalSettings.InvariantCultureInfo);
+                    decimal.TryParse(strFirstHalf.FastEscape('+'), NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decMin);
 
                 if (decMin != 0 || decMax != decimal.MaxValue)
                 {
@@ -569,13 +569,19 @@ namespace Chummer.Backend.Equipment
                     {
                         foreach (XmlNode nodChild in xmlNodeList)
                         {
-                            Weapon objWeapon = new Weapon(_objCharacter)
+                            Weapon objWeapon = new Weapon(_objCharacter);
+                            try
                             {
-                                ParentVehicle = Parent,
-                                ParentVehicleMod = this
-                            };
-                            objWeapon.Load(nodChild, blnCopy);
-                            _lstVehicleWeapons.Add(objWeapon);
+                                objWeapon.ParentVehicle = Parent;
+                                objWeapon.ParentVehicleMod = this;
+                                objWeapon.Load(nodChild, blnCopy);
+                                _lstVehicleWeapons.Add(objWeapon);
+                            }
+                            catch
+                            {
+                                objWeapon.DeleteWeapon();
+                                throw;
+                            }
                         }
                     }
                     else
@@ -583,10 +589,18 @@ namespace Chummer.Backend.Equipment
                         foreach (XmlNode nodChild in xmlNodeList)
                         {
                             Weapon objWeapon = new Weapon(_objCharacter);
-                            await objWeapon.SetParentVehicleAsync(Parent, token).ConfigureAwait(false);
-                            await objWeapon.SetParentVehicleModAsync(this, token).ConfigureAwait(false);
-                            await objWeapon.LoadAsync(nodChild, blnCopy, token).ConfigureAwait(false);
-                            await _lstVehicleWeapons.AddAsync(objWeapon, token).ConfigureAwait(false);
+                            try
+                            {
+                                await objWeapon.SetParentVehicleAsync(Parent, token).ConfigureAwait(false);
+                                await objWeapon.SetParentVehicleModAsync(this, token).ConfigureAwait(false);
+                                await objWeapon.LoadAsync(nodChild, blnCopy, token).ConfigureAwait(false);
+                                await _lstVehicleWeapons.AddAsync(objWeapon, token).ConfigureAwait(false);
+                            }
+                            catch
+                            {
+                                await objWeapon.DeleteWeaponAsync(token: CancellationToken.None).ConfigureAwait(false);
+                                throw;
+                            }
                         }
                     }
                 }
@@ -601,12 +615,18 @@ namespace Chummer.Backend.Equipment
                     {
                         foreach (XmlNode nodChild in xmlNodeList)
                         {
-                            Cyberware objCyberware = new Cyberware(_objCharacter)
+                            Cyberware objCyberware = new Cyberware(_objCharacter);
+                            try
                             {
-                                ParentVehicle = Parent
-                            };
-                            objCyberware.Load(nodChild, blnCopy, token);
-                            _lstCyberware.Add(objCyberware);
+                                objCyberware.ParentVehicle = Parent;
+                                objCyberware.Load(nodChild, blnCopy, token);
+                                _lstCyberware.Add(objCyberware);
+                            }
+                            catch
+                            {
+                                objCyberware.DeleteCyberware();
+                                throw;
+                            }
                         }
                     }
                     else
@@ -614,9 +634,17 @@ namespace Chummer.Backend.Equipment
                         foreach (XmlNode nodChild in xmlNodeList)
                         {
                             Cyberware objCyberware = new Cyberware(_objCharacter);
-                            await objCyberware.SetParentVehicleAsync(Parent, token).ConfigureAwait(false);
-                            await objCyberware.LoadAsync(nodChild, blnCopy, token).ConfigureAwait(false);
-                            await _lstCyberware.AddAsync(objCyberware, token).ConfigureAwait(false);
+                            try
+                            {
+                                await objCyberware.SetParentVehicleAsync(Parent, token).ConfigureAwait(false);
+                                await objCyberware.LoadAsync(nodChild, blnCopy, token).ConfigureAwait(false);
+                                await _lstCyberware.AddAsync(objCyberware, token).ConfigureAwait(false);
+                            }
+                            catch
+                            {
+                                await objCyberware.DeleteCyberwareAsync(token: CancellationToken.None).ConfigureAwait(false);
+                                throw;
+                            }
                         }
                     }
                 }
@@ -655,6 +683,7 @@ namespace Chummer.Backend.Equipment
             await objWriter.WriteElementStringAsync("name", await DisplayNameShortAsync(strLanguageToPrint, token).ConfigureAwait(false), token).ConfigureAwait(false);
             await objWriter.WriteElementStringAsync("name_english", Name, token).ConfigureAwait(false);
             await objWriter.WriteElementStringAsync("fullname", await DisplayNameAsync(objCulture, strLanguageToPrint, token).ConfigureAwait(false), token).ConfigureAwait(false);
+            await objWriter.WriteElementStringAsync("fullname_english", await DisplayNameAsync(GlobalSettings.InvariantCultureInfo, GlobalSettings.DefaultLanguage, token).ConfigureAwait(false), token).ConfigureAwait(false);
             await objWriter.WriteElementStringAsync("category", await DisplayCategoryAsync(strLanguageToPrint, token).ConfigureAwait(false), token).ConfigureAwait(false);
             await objWriter.WriteElementStringAsync("category_english", Category, token).ConfigureAwait(false);
             await objWriter.WriteElementStringAsync("limit", Limit, token).ConfigureAwait(false);
@@ -1785,84 +1814,94 @@ namespace Chummer.Backend.Equipment
         /// <summary>
         /// Calculated Capacity of the Vehicle Mod.
         /// </summary>
-        public string CalculatedCapacity
+        public string CalculatedCapacity => GetCalculatedCapacity(GlobalSettings.CultureInfo);
+
+        /// <summary>
+        /// Calculated Capacity of the Vehicle Mod.
+        /// </summary>
+        public string GetCalculatedCapacity(CultureInfo objCulture)
         {
-            get
+            string strReturn = Capacity;
+            if (string.IsNullOrEmpty(strReturn))
+                return 0.0m.ToString("#,0.##", objCulture);
+
+            strReturn = strReturn.ProcessFixedValuesString(() => Rating);
+
+            int intPos = strReturn.IndexOf("/[", StringComparison.Ordinal);
+            if (intPos != -1)
             {
-                string strReturn = Capacity;
-                if (string.IsNullOrEmpty(strReturn))
-                    return 0.0m.ToString("#,0.##", GlobalSettings.CultureInfo);
+                string strFirstHalf = strReturn.Substring(0, intPos);
+                string strSecondHalf = strReturn.Substring(intPos + 1);
+                bool blnSquareBrackets = strFirstHalf.StartsWith('[');
 
-                strReturn = strReturn.ProcessFixedValuesString(() => Rating);
+                if (blnSquareBrackets && strFirstHalf.Length > 2)
+                    strFirstHalf = strFirstHalf.Substring(1, strFirstHalf.Length - 2);
 
-                int intPos = strReturn.IndexOf("/[", StringComparison.Ordinal);
-                if (intPos != -1)
+                if (strFirstHalf == "[*]")
+                    strReturn = "*";
+                else
                 {
-                    string strFirstHalf = strReturn.Substring(0, intPos);
-                    string strSecondHalf = strReturn.Substring(intPos + 1);
-                    bool blnSquareBrackets = strFirstHalf.StartsWith('[');
+                    strFirstHalf = strFirstHalf.ProcessFixedValuesString(() => Rating);
 
-                    if (blnSquareBrackets && strFirstHalf.Length > 2)
-                        strFirstHalf = strFirstHalf.Substring(1, strFirstHalf.Length - 2);
-
-                    if (strFirstHalf == "[*]")
-                        strReturn = "*";
-                    else
+                    if (strFirstHalf.DoesNeedXPathProcessingToBeConvertedToNumber(out decimal decValue2))
                     {
-                        strFirstHalf = strFirstHalf.ProcessFixedValuesString(() => Rating);
-
-                        if (strFirstHalf.DoesNeedXPathProcessingToBeConvertedToNumber(out decimal decValue2))
-                        {
-                            decValue2 = ProcessRatingStringAsDec(strFirstHalf, () => Rating, out bool blnIsSuccess);
-                            strReturn = blnIsSuccess ? decValue2.ToString("#,0.##", GlobalSettings.CultureInfo) : strFirstHalf;
-                        }
-                        else
-                            strReturn = decValue2.ToString("#,0.##", GlobalSettings.CultureInfo);
-                    }
-
-                    if (blnSquareBrackets)
-                        strReturn = '[' + strReturn + ']';
-
-                    if (strSecondHalf.DoesNeedXPathProcessingToBeConvertedToNumber(out decimal decValue))
-                    {
-                        strSecondHalf = strSecondHalf.Trim('[', ']');
-                        decValue = ProcessRatingStringAsDec(strFirstHalf, () => Rating, out bool blnIsSuccess);
-                        strSecondHalf = '[' + (blnIsSuccess ? decValue.ToString("#,0.##", GlobalSettings.CultureInfo) : strSecondHalf) + ']';
+                        decValue2 = ProcessRatingStringAsDec(strFirstHalf, () => Rating, out bool blnIsSuccess);
+                        strReturn = blnIsSuccess ? decValue2.ToString("#,0.##", objCulture) : strFirstHalf;
                     }
                     else
-                        strSecondHalf = decValue.ToString("#,0.##", GlobalSettings.CultureInfo);
-
-                    strReturn += '/' + strSecondHalf;
+                        strReturn = decValue2.ToString("#,0.##", objCulture);
                 }
-                else if (strReturn.DoesNeedXPathProcessingToBeConvertedToNumber(out decimal decReturn))
+
+                if (blnSquareBrackets)
+                    strReturn = '[' + strReturn + ']';
+
+                if (strSecondHalf.DoesNeedXPathProcessingToBeConvertedToNumber(out decimal decValue))
                 {
-                    // If the Capacity is determined by the Rating, evaluate the expression.
-                    // XPathExpression cannot evaluate while there are square brackets, so remove them if necessary.
-                    bool blnSquareBrackets = strReturn.StartsWith('[');
-                    string strCapacity = strReturn;
-                    if (blnSquareBrackets)
-                        strCapacity = strCapacity.Substring(1, strCapacity.Length - 2);
-                    decReturn = ProcessRatingStringAsDec(strCapacity, () => Rating, out bool blnIsSuccess);
-                    strReturn = blnIsSuccess ? decReturn.ToString("#,0.##", GlobalSettings.CultureInfo) : strCapacity;
-                    if (blnSquareBrackets)
-                        strReturn = '[' + strReturn + ']';
+                    strSecondHalf = strSecondHalf.Trim('[', ']');
+                    decValue = ProcessRatingStringAsDec(strFirstHalf, () => Rating, out bool blnIsSuccess);
+                    strSecondHalf = '[' + (blnIsSuccess ? decValue.ToString("#,0.##", objCulture) : strSecondHalf) + ']';
                 }
                 else
-                    return decReturn.ToString("#,0.##", GlobalSettings.CultureInfo);
+                    strSecondHalf = decValue.ToString("#,0.##", objCulture);
 
-                return strReturn;
+                strReturn += '/' + strSecondHalf;
             }
+            else if (strReturn.DoesNeedXPathProcessingToBeConvertedToNumber(out decimal decReturn))
+            {
+                // If the Capacity is determined by the Rating, evaluate the expression.
+                // XPathExpression cannot evaluate while there are square brackets, so remove them if necessary.
+                bool blnSquareBrackets = strReturn.StartsWith('[');
+                string strCapacity = strReturn;
+                if (blnSquareBrackets)
+                    strCapacity = strCapacity.Substring(1, strCapacity.Length - 2);
+                decReturn = ProcessRatingStringAsDec(strCapacity, () => Rating, out bool blnIsSuccess);
+                strReturn = blnIsSuccess ? decReturn.ToString("#,0.##", objCulture) : strCapacity;
+                if (blnSquareBrackets)
+                    strReturn = '[' + strReturn + ']';
+            }
+            else
+                return decReturn.ToString("#,0.##", objCulture);
+
+            return strReturn;
         }
 
         /// <summary>
         /// Calculated Capacity of the Vehicle Mod.
         /// </summary>
-        public async Task<string> GetCalculatedCapacityAsync(CancellationToken token = default)
+        public Task<string> GetCalculatedCapacityAsync(CancellationToken token = default)
+        {
+            return GetCalculatedCapacityAsync(GlobalSettings.CultureInfo, token);
+        }
+
+        /// <summary>
+        /// Calculated Capacity of the Vehicle Mod.
+        /// </summary>
+        public async Task<string> GetCalculatedCapacityAsync(CultureInfo objCulture, CancellationToken token = default)
         {
             token.ThrowIfCancellationRequested();
             string strReturn = Capacity;
             if (string.IsNullOrEmpty(strReturn))
-                return 0.0m.ToString("#,0.##", GlobalSettings.CultureInfo);
+                return 0.0m.ToString("#,0.##", objCulture);
 
             strReturn = await strReturn.ProcessFixedValuesStringAsync(() => GetRatingAsync(token), token).ConfigureAwait(false);
 
@@ -1886,10 +1925,10 @@ namespace Chummer.Backend.Equipment
                     {
                         bool blnIsSuccess;
                         (decValue2, blnIsSuccess) = await ProcessRatingStringAsDecAsync(strFirstHalf, () => GetRatingAsync(token), token).ConfigureAwait(false);
-                        strReturn = blnIsSuccess ? decValue2.ToString("#,0.##", GlobalSettings.CultureInfo) : strFirstHalf;
+                        strReturn = blnIsSuccess ? decValue2.ToString("#,0.##", objCulture) : strFirstHalf;
                     }
                     else
-                        strReturn = decValue2.ToString("#,0.##", GlobalSettings.CultureInfo);
+                        strReturn = decValue2.ToString("#,0.##", objCulture);
                 }
 
                 if (blnSquareBrackets)
@@ -1900,10 +1939,10 @@ namespace Chummer.Backend.Equipment
                     strSecondHalf = strSecondHalf.Trim('[', ']');
                     bool blnIsSuccess;
                     (decValue, blnIsSuccess) = await ProcessRatingStringAsDecAsync(strSecondHalf, () => GetRatingAsync(token), token).ConfigureAwait(false);
-                    strSecondHalf = '[' + (blnIsSuccess ? decValue.ToString("#,0.##", GlobalSettings.CultureInfo) : strSecondHalf) + ']';
+                    strSecondHalf = '[' + (blnIsSuccess ? decValue.ToString("#,0.##", objCulture) : strSecondHalf) + ']';
                 }
                 else
-                    strSecondHalf = decValue.ToString("#,0.##", GlobalSettings.CultureInfo);
+                    strSecondHalf = decValue.ToString("#,0.##", objCulture);
 
                 strReturn += '/' + strSecondHalf;
             }
@@ -1917,12 +1956,12 @@ namespace Chummer.Backend.Equipment
                     strCapacity = strCapacity.Substring(1, strCapacity.Length - 2);
                 bool blnIsSuccess;
                 (decReturn, blnIsSuccess) = await ProcessRatingStringAsDecAsync(strCapacity, () => GetRatingAsync(token), token).ConfigureAwait(false);
-                strReturn = blnIsSuccess ? decReturn.ToString("#,0.##", GlobalSettings.CultureInfo) : strCapacity;
+                strReturn = blnIsSuccess ? decReturn.ToString("#,0.##", objCulture) : strCapacity;
                 if (blnSquareBrackets)
                     strReturn = '[' + strReturn + ']';
             }
             else
-                return decReturn.ToString("#,0.##", GlobalSettings.CultureInfo);
+                return decReturn.ToString("#,0.##", objCulture);
 
             return strReturn;
         }
@@ -1939,13 +1978,14 @@ namespace Chummer.Backend.Equipment
                 if (Capacity.Contains("/["))
                 {
                     // Get the Cyberware base Capacity.
-                    string strBaseCapacity = CalculatedCapacity;
+                    string strBaseCapacity = GetCalculatedCapacity(GlobalSettings.InvariantCultureInfo);
                     strBaseCapacity = strBaseCapacity.Substring(0, strBaseCapacity.IndexOf('/'));
-                    return Convert.ToDecimal(strBaseCapacity, GlobalSettings.CultureInfo)
+                    decimal.TryParse(strBaseCapacity, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decimal decReturn);
+                    return decReturn
                            // Run through its Children and deduct the Capacity costs.
                            - Cyberware.Sum(objCyberware =>
                            {
-                               string strCapacity = objCyberware.CalculatedCapacity;
+                               string strCapacity = objCyberware.GetCalculatedCapacity(GlobalSettings.InvariantCultureInfo);
                                int intPos = strCapacity.IndexOf("/[", StringComparison.Ordinal);
                                if (intPos != -1)
                                    strCapacity = strCapacity.Substring(intPos + 2,
@@ -1954,7 +1994,7 @@ namespace Chummer.Backend.Equipment
                                    strCapacity = strCapacity.Substring(1, strCapacity.Length - 2);
                                if (strCapacity == "*")
                                    strCapacity = "0";
-                               decimal.TryParse(strCapacity, NumberStyles.Any, GlobalSettings.CultureInfo, out decimal decInner);
+                               decimal.TryParse(strCapacity, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decimal decInner);
                                return decInner;
                            });
                 }
@@ -1962,11 +2002,12 @@ namespace Chummer.Backend.Equipment
                 if (!Capacity.Contains('['))
                 {
                     // Get the Cyberware base Capacity.
-                    return Convert.ToDecimal(CalculatedCapacity, GlobalSettings.CultureInfo)
+                    decimal.TryParse(GetCalculatedCapacity(GlobalSettings.InvariantCultureInfo), NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decimal decReturn);
+                    return decReturn
                            // Run through its Children and deduct the Capacity costs.
                            - Cyberware.Sum(objCyberware =>
                            {
-                               string strCapacity = objCyberware.CalculatedCapacity;
+                               string strCapacity = objCyberware.GetCalculatedCapacity(GlobalSettings.InvariantCultureInfo);
                                int intPos = strCapacity.IndexOf("/[", StringComparison.Ordinal);
                                if (intPos != -1)
                                    strCapacity = strCapacity.Substring(intPos + 2,
@@ -1975,7 +2016,7 @@ namespace Chummer.Backend.Equipment
                                    strCapacity = strCapacity.Substring(1, strCapacity.Length - 2);
                                if (strCapacity == "*")
                                    strCapacity = "0";
-                               decimal.TryParse(strCapacity, NumberStyles.Any, GlobalSettings.CultureInfo, out decimal decInner);
+                               decimal.TryParse(strCapacity, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decimal decInner);
                                return decInner;
                            });
                 }
@@ -1994,13 +2035,14 @@ namespace Chummer.Backend.Equipment
             if (Capacity.Contains("/["))
             {
                 // Get the Cyberware base Capacity.
-                string strBaseCapacity = await GetCalculatedCapacityAsync(token).ConfigureAwait(false);
+                string strBaseCapacity = await GetCalculatedCapacityAsync(GlobalSettings.InvariantCultureInfo, token).ConfigureAwait(false);
                 strBaseCapacity = strBaseCapacity.Substring(0, strBaseCapacity.IndexOf('/'));
-                return Convert.ToDecimal(strBaseCapacity, GlobalSettings.CultureInfo)
+                decimal.TryParse(strBaseCapacity, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decimal decReturn);
+                return decReturn
                               // Run through its Children and deduct the Capacity costs.
                               - await Cyberware.SumAsync(async objCyberware =>
                               {
-                                  string strCapacity = await objCyberware.GetCalculatedCapacityAsync(token).ConfigureAwait(false);
+                                  string strCapacity = await objCyberware.GetCalculatedCapacityAsync(GlobalSettings.InvariantCultureInfo, token).ConfigureAwait(false);
                                   int intPos = strCapacity.IndexOf("/[", StringComparison.Ordinal);
                                   if (intPos != -1)
                                       strCapacity = strCapacity.Substring(intPos + 2,
@@ -2009,7 +2051,7 @@ namespace Chummer.Backend.Equipment
                                       strCapacity = strCapacity.Substring(1, strCapacity.Length - 2);
                                   if (strCapacity == "*")
                                       strCapacity = "0";
-                                  decimal.TryParse(strCapacity, NumberStyles.Any, GlobalSettings.CultureInfo, out decimal decInner);
+                                  decimal.TryParse(strCapacity, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decimal decInner);
                                   return decInner;
                               }, token).ConfigureAwait(false);
             }
@@ -2017,11 +2059,12 @@ namespace Chummer.Backend.Equipment
             if (!Capacity.Contains('['))
             {
                 // Get the Cyberware base Capacity.
-                return Convert.ToDecimal(await GetCalculatedCapacityAsync(token).ConfigureAwait(false), GlobalSettings.CultureInfo)
+                decimal.TryParse(await GetCalculatedCapacityAsync(GlobalSettings.InvariantCultureInfo, token).ConfigureAwait(false), NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decimal decReturn);
+                return decReturn
                        // Run through its Children and deduct the Capacity costs.
                        - await Cyberware.SumAsync(async objCyberware =>
                        {
-                           string strCapacity = await objCyberware.GetCalculatedCapacityAsync(token).ConfigureAwait(false);
+                           string strCapacity = await objCyberware.GetCalculatedCapacityAsync(GlobalSettings.InvariantCultureInfo, token).ConfigureAwait(false);
                            int intPos = strCapacity.IndexOf("/[", StringComparison.Ordinal);
                            if (intPos != -1)
                                strCapacity = strCapacity.Substring(intPos + 2,
@@ -2030,7 +2073,7 @@ namespace Chummer.Backend.Equipment
                                strCapacity = strCapacity.Substring(1, strCapacity.Length - 2);
                            if (strCapacity == "*")
                                strCapacity = "0";
-                           decimal.TryParse(strCapacity, NumberStyles.Any, GlobalSettings.CultureInfo, out decimal decInner);
+                           decimal.TryParse(strCapacity, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decimal decInner);
                            return decInner;
                        }, token).ConfigureAwait(false);
             }

@@ -2180,6 +2180,7 @@ namespace Chummer
                     break;
 
                 case ImprovementType.SpecialSkills:
+                    // We directly modify the ForceDisabled property for these improvements, so we don't need to return anything
                     break;
 
                 case ImprovementType.SkillAttribute:
@@ -4722,6 +4723,7 @@ namespace Chummer
                     break;
 
                 case ImprovementType.SpecialSkills:
+                    // We directly modify the ForceDisabled property for these improvements, so we don't need to return anything
                     break;
 
                 case ImprovementType.SkillAttribute:

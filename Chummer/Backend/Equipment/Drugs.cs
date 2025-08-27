@@ -474,6 +474,11 @@ namespace Chummer.Backend.Equipment
             set => _strName = _objCharacter.ReverseTranslateExtra(value);
         }
 
+        public async Task SetNameAsync(string value, CancellationToken token = default)
+        {
+            _strName = await _objCharacter.ReverseTranslateExtraAsync(value, token: token).ConfigureAwait(false);
+        }
+
         /// <summary>
         /// Translated Category.
         /// </summary>
@@ -722,7 +727,7 @@ namespace Chummer.Backend.Equipment
         public async Task<int> GetAddictionThresholdAsync(CancellationToken token = default)
         {
             token.ThrowIfCancellationRequested();
-            return _intCachedAddictionRating != int.MinValue
+            return _intCachedAddictionThreshold != int.MinValue
                     ? _intCachedAddictionThreshold
                     : _intCachedAddictionThreshold = await Components.SumAsync(d => d.ActiveDrugEffect != null, d => d.AddictionThreshold, token).ConfigureAwait(false);
         }
@@ -1822,7 +1827,7 @@ namespace Chummer.Backend.Equipment
                             }
                             catch
                             {
-                                await objAddQuality.DisposeAsync().ConfigureAwait(false);
+                                await objAddQuality.DeleteQualityAsync(token: CancellationToken.None).ConfigureAwait(false);
                                 throw;
                             }
                         }

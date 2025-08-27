@@ -383,11 +383,11 @@ namespace Chummer.Backend.Equipment
                     decimal decMax = decimal.MaxValue;
                     if (intHyphenIndex != -1)
                     {
-                        decMin = Convert.ToDecimal(strFirstHalf, GlobalSettings.InvariantCultureInfo);
-                        decMax = Convert.ToDecimal(strSecondHalf, GlobalSettings.InvariantCultureInfo);
+                        decimal.TryParse(strFirstHalf, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decMin);
+                        decimal.TryParse(strSecondHalf, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decMax);
                     }
                     else
-                        decMin = Convert.ToDecimal(strFirstHalf.FastEscape('+'), GlobalSettings.InvariantCultureInfo);
+                        decimal.TryParse(strFirstHalf.FastEscape('+'), NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decMin);
 
                     if (decMin != 0 || decMax != decimal.MaxValue)
                     {
@@ -550,19 +550,30 @@ namespace Chummer.Backend.Equipment
                             }
 
                             Weapon objGearWeapon = new Weapon(_objCharacter);
-                            if (blnSync)
-                                // ReSharper disable once MethodHasAsyncOverload
-                                objGearWeapon.Create(objXmlWeapon, lstWeapons, true, blnAddImprovements,
-                                    blnSkipSelectForms, intAddWeaponRating, token: token);
-                            else
-                                await objGearWeapon.CreateAsync(objXmlWeapon, lstWeapons, true, blnAddImprovements,
-                                    blnSkipSelectForms, intAddWeaponRating, token: token).ConfigureAwait(false);
-                            objGearWeapon.ParentID = InternalId;
-                            objGearWeapon.Cost = "0";
-                            if (Guid.TryParse(objGearWeapon.InternalId, out _guiWeaponID))
-                                lstWeapons.Add(objGearWeapon);
-                            else
-                                _guiWeaponID = Guid.Empty;
+                            try
+                            {
+                                if (blnSync)
+                                    // ReSharper disable once MethodHasAsyncOverload
+                                    objGearWeapon.Create(objXmlWeapon, lstWeapons, true, blnAddImprovements,
+                                        blnSkipSelectForms, intAddWeaponRating, token: token);
+                                else
+                                    await objGearWeapon.CreateAsync(objXmlWeapon, lstWeapons, true, blnAddImprovements,
+                                        blnSkipSelectForms, intAddWeaponRating, token: token).ConfigureAwait(false);
+                                objGearWeapon.ParentID = InternalId;
+                                objGearWeapon.Cost = "0";
+                                if (Guid.TryParse(objGearWeapon.InternalId, out _guiWeaponID))
+                                    lstWeapons.Add(objGearWeapon);
+                                else
+                                    _guiWeaponID = Guid.Empty;
+                            }
+                            catch
+                            {
+                                if (blnSync)
+                                    objGearWeapon.DeleteWeapon();
+                                else
+                                    await objGearWeapon.DeleteWeaponAsync(token: CancellationToken.None).ConfigureAwait(false);
+                                throw;
+                            }
                         }
                     }
                 }
@@ -879,25 +890,33 @@ namespace Chummer.Backend.Equipment
             if (string.IsNullOrEmpty(strChildQty) || !decimal.TryParse(strChildQty, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decChildQty))
                 decChildQty = 1.0m;
 
-            Gear objChild = new Gear(_objCharacter);
             List<Weapon> lstChildWeapons = new List<Weapon>(1);
-            objChild.Create(xmlChildDataNode, intChildRating, lstChildWeapons, strChildForceValue,
-                blnAddChildImprovements, blnCreateChildren, blnSkipSelectForms);
-            objChild.Quantity = decChildQty;
-            objChild.Cost = "0";
-            objChild.ParentID = InternalId;
-            if (!string.IsNullOrEmpty(strChildForceSource))
-                objChild.Source = strChildForceSource;
-            if (!string.IsNullOrEmpty(strChildForcePage))
-                objChild.Page = strChildForcePage;
-            Children.Add(objChild);
-            this.RefreshMatrixAttributeArray(_objCharacter);
+            Gear objChild = new Gear(_objCharacter);
+            try
+            {
+                objChild.Create(xmlChildDataNode, intChildRating, lstChildWeapons, strChildForceValue,
+                    blnAddChildImprovements, blnCreateChildren, blnSkipSelectForms);
+                objChild.Quantity = decChildQty;
+                objChild.Cost = "0";
+                objChild.ParentID = InternalId;
+                if (!string.IsNullOrEmpty(strChildForceSource))
+                    objChild.Source = strChildForceSource;
+                if (!string.IsNullOrEmpty(strChildForcePage))
+                    objChild.Page = strChildForcePage;
+                Children.Add(objChild);
+                this.RefreshMatrixAttributeArray(_objCharacter);
 
-            // Change the Capacity of the child if necessary.
-            if (xmlChildNode["capacity"] != null)
-                objChild.Capacity = xmlChildNode["capacity"].InnerText;
+                // Change the Capacity of the child if necessary.
+                if (xmlChildNode["capacity"] != null)
+                    objChild.Capacity = xmlChildNode["capacity"].InnerText;
 
-            objChild.CreateChildren(xmlChildNode, blnAddChildImprovements, blnSkipSelectForms);
+                objChild.CreateChildren(xmlChildNode, blnAddChildImprovements, blnSkipSelectForms);
+            }
+            catch
+            {
+                objChild.DeleteGear();
+                throw;
+            }
         }
 
         private async Task CreateChildrenAsync(XmlNode xmlParentGearNode, bool blnAddImprovements, bool blnSkipSelectForms, CancellationToken token = default)
@@ -1089,25 +1108,33 @@ namespace Chummer.Backend.Equipment
             if (string.IsNullOrEmpty(strChildQty) || !decimal.TryParse(strChildQty, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decChildQty))
                 decChildQty = 1.0m;
 
-            Gear objChild = new Gear(_objCharacter);
             List<Weapon> lstChildWeapons = new List<Weapon>(1);
-            await objChild.CreateAsync(xmlChildDataNode, intChildRating, lstChildWeapons, strChildForceValue,
-                blnAddChildImprovements, blnCreateChildren, blnSkipSelectForms, token).ConfigureAwait(false);
-            await objChild.SetQuantityAsync(decChildQty, token).ConfigureAwait(false);
-            objChild.Cost = "0";
-            objChild.ParentID = InternalId;
-            if (!string.IsNullOrEmpty(strChildForceSource))
-                objChild.Source = strChildForceSource;
-            if (!string.IsNullOrEmpty(strChildForcePage))
-                objChild.Page = strChildForcePage;
-            await Children.AddAsync(objChild, token).ConfigureAwait(false);
-            await this.RefreshMatrixAttributeArrayAsync(_objCharacter, token).ConfigureAwait(false);
+            Gear objChild = new Gear(_objCharacter);
+            try
+            {
+                await objChild.CreateAsync(xmlChildDataNode, intChildRating, lstChildWeapons, strChildForceValue,
+                    blnAddChildImprovements, blnCreateChildren, blnSkipSelectForms, token).ConfigureAwait(false);
+                await objChild.SetQuantityAsync(decChildQty, token).ConfigureAwait(false);
+                objChild.Cost = "0";
+                objChild.ParentID = InternalId;
+                if (!string.IsNullOrEmpty(strChildForceSource))
+                    objChild.Source = strChildForceSource;
+                if (!string.IsNullOrEmpty(strChildForcePage))
+                    objChild.Page = strChildForcePage;
+                await Children.AddAsync(objChild, token).ConfigureAwait(false);
+                await this.RefreshMatrixAttributeArrayAsync(_objCharacter, token).ConfigureAwait(false);
 
-            // Change the Capacity of the child if necessary.
-            if (xmlChildNode["capacity"] != null)
-                objChild.Capacity = xmlChildNode["capacity"].InnerText;
+                // Change the Capacity of the child if necessary.
+                if (xmlChildNode["capacity"] != null)
+                    objChild.Capacity = xmlChildNode["capacity"].InnerText;
 
-            await objChild.CreateChildrenAsync(xmlChildNode, blnAddChildImprovements, blnSkipSelectForms, token).ConfigureAwait(false);
+                await objChild.CreateChildrenAsync(xmlChildNode, blnAddChildImprovements, blnSkipSelectForms, token).ConfigureAwait(false);
+            }
+            catch
+            {
+                await objChild.DeleteGearAsync(token: CancellationToken.None).ConfigureAwait(false);
+                throw;
+            }
         }
 
         /// <summary>
@@ -1144,15 +1171,23 @@ namespace Chummer.Backend.Equipment
                     foreach (XmlNode xmlChildGearNode in xmlInnerGears)
                     {
                         Gear objChildGear = new Gear(_objCharacter);
-                        if (objChildGear.CreateFromNode(xmlGearsDocument, xmlChildGearNode, lstWeapons,
-                            blnAddImprovements, blnSkipSelectForms))
+                        try
                         {
-                            objChildGear.ParentID = InternalId;
-                            objChildGear.Parent = this;
-                            lstChildGears.Add(objChildGear);
+                            if (objChildGear.CreateFromNode(xmlGearsDocument, xmlChildGearNode, lstWeapons,
+                                blnAddImprovements, blnSkipSelectForms))
+                            {
+                                objChildGear.ParentID = InternalId;
+                                objChildGear.Parent = this;
+                                lstChildGears.Add(objChildGear);
+                            }
+                            else
+                                objChildGear.DeleteGear();
                         }
-                        else
-                            Utils.BreakIfDebug();
+                        catch
+                        {
+                            objChildGear.DeleteGear();
+                            throw;
+                        }
                     }
                 }
             }
@@ -1248,15 +1283,23 @@ namespace Chummer.Backend.Equipment
                     foreach (XmlNode xmlChildGearNode in xmlInnerGears)
                     {
                         Gear objChildGear = new Gear(_objCharacter);
-                        if (await objChildGear.CreateFromNodeAsync(xmlGearsDocument, xmlChildGearNode, lstWeapons,
-                                blnAddImprovements, blnSkipSelectForms, token).ConfigureAwait(false))
+                        try
                         {
-                            objChildGear.ParentID = InternalId;
-                            objChildGear.Parent = this;
-                            lstChildGears.Add(objChildGear);
+                            if (await objChildGear.CreateFromNodeAsync(xmlGearsDocument, xmlChildGearNode, lstWeapons,
+                                    blnAddImprovements, blnSkipSelectForms, token).ConfigureAwait(false))
+                            {
+                                objChildGear.ParentID = InternalId;
+                                await objChildGear.SetParentAsync(this, token).ConfigureAwait(false);
+                                lstChildGears.Add(objChildGear);
+                            }
+                            else
+                                await objChildGear.DeleteGearAsync(token: token).ConfigureAwait(false);
                         }
-                        else
-                            Utils.BreakIfDebug();
+                        catch
+                        {
+                            await objChildGear.DeleteGearAsync(token: CancellationToken.None).ConfigureAwait(false);
+                            throw;
+                        }
                     }
                 }
             }
@@ -1373,8 +1416,16 @@ namespace Chummer.Backend.Equipment
                     foreach (Gear objGearChild in objGear.Children)
                     {
                         Gear objChild = new Gear(_objCharacter);
-                        objChild.Copy(objGearChild);
-                        lstToAdd.Add(objChild);
+                        try
+                        {
+                            objChild.Copy(objGearChild);
+                            lstToAdd.Add(objChild);
+                        }
+                        catch
+                        {
+                            objChild.DeleteGear();
+                            throw;
+                        }
                     }
                     _lstChildren.Clear();
                     _lstChildren.AddRange(lstToAdd);
@@ -1454,8 +1505,16 @@ namespace Chummer.Backend.Equipment
                     await objGear.Children.ForEachAsync(async objGearChild =>
                     {
                         Gear objChild = new Gear(_objCharacter);
-                        await objChild.CopyAsync(objGearChild, token).ConfigureAwait(false);
-                        lstToAdd.Add(objChild);
+                        try
+                        {
+                            await objChild.CopyAsync(objGearChild, token).ConfigureAwait(false);
+                            lstToAdd.Add(objChild);
+                        }
+                        catch
+                        {
+                            await objChild.DeleteGearAsync(token: CancellationToken.None).ConfigureAwait(false);
+                            throw;
+                        }
                     }, token).ConfigureAwait(false);
                     await _lstChildren.ClearAsync(token).ConfigureAwait(false);
                     await _lstChildren.AddRangeAsync(lstToAdd, token).ConfigureAwait(false);
@@ -1726,9 +1785,17 @@ namespace Chummer.Backend.Equipment
                         foreach (XmlNode nodChild in nodChildren)
                         {
                             Gear objGear = new Gear(_objCharacter);
-                            objGear.Load(nodChild, blnCopy);
-                            objGear.Parent = this;
-                            _lstChildren.Add(objGear);
+                            try
+                            {
+                                objGear.Load(nodChild, blnCopy);
+                                objGear.Parent = this;
+                                _lstChildren.Add(objGear);
+                            }
+                            catch
+                            {
+                                objGear.DeleteGear();
+                                throw;
+                            }
                         }
                     }
                     else
@@ -1736,9 +1803,17 @@ namespace Chummer.Backend.Equipment
                         foreach (XmlNode nodChild in nodChildren)
                         {
                             Gear objGear = new Gear(_objCharacter);
-                            await objGear.LoadAsync(nodChild, blnCopy, token).ConfigureAwait(false);
-                            await objGear.SetParentAsync(this, token).ConfigureAwait(false);
-                            await _lstChildren.AddAsync(objGear, token).ConfigureAwait(false);
+                            try
+                            {
+                                await objGear.LoadAsync(nodChild, blnCopy, token).ConfigureAwait(false);
+                                await objGear.SetParentAsync(this, token).ConfigureAwait(false);
+                                await _lstChildren.AddAsync(objGear, token).ConfigureAwait(false);
+                            }
+                            catch
+                            {
+                                await objGear.DeleteGearAsync(token: CancellationToken.None).ConfigureAwait(false);
+                                throw;
+                            }
                         }
                     }
                 }
@@ -1757,9 +1832,17 @@ namespace Chummer.Backend.Equipment
                         if (intMyRating > 0)
                         {
                             Gear objNuyenGear = new Gear(_objCharacter);
-                            objNuyenGear.Create(objNuyenNode, 0, new List<Weapon>(1), token: token);
-                            objNuyenGear.Quantity = intMyRating;
-                            _lstChildren.Add(objNuyenGear);
+                            try
+                            {
+                                objNuyenGear.Create(objNuyenNode, 0, new List<Weapon>(1), token: token);
+                                objNuyenGear.Quantity = intMyRating;
+                                _lstChildren.Add(objNuyenGear);
+                            }
+                            catch
+                            {
+                                objNuyenGear.DeleteGear();
+                                throw;
+                            }
                         }
 
                         objMyNode.Value?.TryGetStringFieldQuickly("rating", ref _strMaxRating);
@@ -1780,9 +1863,17 @@ namespace Chummer.Backend.Equipment
                         if (intMyRating > 0)
                         {
                             Gear objNuyenGear = new Gear(_objCharacter);
-                            await objNuyenGear.CreateAsync(objNuyenNode, 0, new List<Weapon>(1), token: token).ConfigureAwait(false);
-                            await objNuyenGear.SetQuantityAsync(intMyRating, token).ConfigureAwait(false);
-                            await _lstChildren.AddAsync(objNuyenGear, token).ConfigureAwait(false);
+                            try
+                            {
+                                await objNuyenGear.CreateAsync(objNuyenNode, 0, new List<Weapon>(1), token: token).ConfigureAwait(false);
+                                await objNuyenGear.SetQuantityAsync(intMyRating, token).ConfigureAwait(false);
+                                await _lstChildren.AddAsync(objNuyenGear, token).ConfigureAwait(false);
+                            }
+                            catch
+                            {
+                                await objNuyenGear.DeleteGearAsync(token: CancellationToken.None).ConfigureAwait(false);
+                                throw;
+                            }
                         }
 
                         (await objMyNodeAsync.GetValueAsync(token).ConfigureAwait(false))?.TryGetStringFieldQuickly("rating", ref _strMaxRating);
@@ -2264,25 +2355,17 @@ namespace Chummer.Backend.Equipment
             {
                 await objWriter.WriteElementStringAsync("guid", InternalId, token).ConfigureAwait(false);
                 await objWriter.WriteElementStringAsync("sourceid", SourceIDString, token).ConfigureAwait(false);
-                if ((Category == "Foci" || Category == "Metamagic Foci") && Bonded)
-                    await objWriter.WriteElementStringAsync(
-                                       "name",
-                                       await DisplayNameShortAsync(strLanguageToPrint, token).ConfigureAwait(false)
-                                       + await LanguageManager
-                                               .GetStringAsync("String_Space", strLanguageToPrint, token: token)
-                                               .ConfigureAwait(false) + await LanguageManager
-                                                                              .GetStringAsync(
-                                                                                  "Label_BondedFoci",
-                                                                                  strLanguageToPrint, token: token)
-                                                                              .ConfigureAwait(false), token)
-                                   .ConfigureAwait(false);
-                else
-                    await objWriter
-                          .WriteElementStringAsync(
-                              "name", await DisplayNameShortAsync(strLanguageToPrint, token).ConfigureAwait(false),
+                await objWriter.WriteElementStringAsync("name", await DisplayNameShortAsync(strLanguageToPrint, token).ConfigureAwait(false),
                               token).ConfigureAwait(false);
-
                 await objWriter.WriteElementStringAsync("name_english", Name, token).ConfigureAwait(false);
+                await objWriter
+                          .WriteElementStringAsync(
+                              "fullname", await DisplayNameAsync(objCulture, strLanguageToPrint, token: token).ConfigureAwait(false),
+                              token).ConfigureAwait(false);
+                await objWriter
+                          .WriteElementStringAsync(
+                              "fullname_english", await DisplayNameAsync(GlobalSettings.InvariantCultureInfo, GlobalSettings.DefaultLanguage, token: token).ConfigureAwait(false),
+                              token).ConfigureAwait(false);
                 await objWriter.WriteElementStringAsync("category", await DisplayCategoryAsync(strLanguageToPrint, token).ConfigureAwait(false), token).ConfigureAwait(false);
                 await objWriter.WriteElementStringAsync("category_english", Category, token).ConfigureAwait(false);
                 await objWriter.WriteElementStringAsync("ispersona",
@@ -4147,83 +4230,93 @@ namespace Chummer.Backend.Equipment
         /// <summary>
         /// Calculated Capacity of the Gear.
         /// </summary>
-        public string CalculatedCapacity
+        public string CalculatedCapacity => GetCalculatedCapacity(GlobalSettings.CultureInfo);
+
+        /// <summary>
+        /// Calculated Capacity of the Gear.
+        /// </summary>
+        public string GetCalculatedCapacity(CultureInfo objCulture)
         {
-            get
+            string strReturn = Capacity;
+            if (string.IsNullOrEmpty(strReturn))
+                return 0.0m.ToString("#,0.##", objCulture);
+            strReturn = strReturn.ProcessFixedValuesString(() => Rating);
+
+            int intPos = strReturn.IndexOf("/[", StringComparison.Ordinal);
+            if (intPos != -1)
             {
-                string strReturn = Capacity;
-                if (string.IsNullOrEmpty(strReturn))
-                    return 0.0m.ToString("#,0.##", GlobalSettings.CultureInfo);
-                strReturn = strReturn.ProcessFixedValuesString(() => Rating);
+                string strFirstHalf = strReturn.Substring(0, intPos).ProcessFixedValuesString(() => Rating);
+                string strSecondHalf = strReturn.Substring(intPos + 1);
+                bool blnSquareBrackets = strFirstHalf.StartsWith('[');
+                if (blnSquareBrackets && strFirstHalf.Length > 2)
+                    strFirstHalf = strFirstHalf.Substring(1, strFirstHalf.Length - 2);
 
-                int intPos = strReturn.IndexOf("/[", StringComparison.Ordinal);
-                if (intPos != -1)
+                if (strFirstHalf == "[*]")
+                    strReturn = "*";
+                else
                 {
-                    string strFirstHalf = strReturn.Substring(0, intPos).ProcessFixedValuesString(() => Rating);
-                    string strSecondHalf = strReturn.Substring(intPos + 1);
-                    bool blnSquareBrackets = strFirstHalf.StartsWith('[');
-                    if (blnSquareBrackets && strFirstHalf.Length > 2)
-                        strFirstHalf = strFirstHalf.Substring(1, strFirstHalf.Length - 2);
+                    strFirstHalf = strFirstHalf.ProcessFixedValuesString(() => Rating);
 
-                    if (strFirstHalf == "[*]")
-                        strReturn = "*";
-                    else
+                    if (strFirstHalf.DoesNeedXPathProcessingToBeConvertedToNumber(out decimal decValue))
                     {
-                        strFirstHalf = strFirstHalf.ProcessFixedValuesString(() => Rating);
-
-                        if (strFirstHalf.DoesNeedXPathProcessingToBeConvertedToNumber(out decimal decValue))
-                        {
-                            decValue = ProcessRatingStringAsDec(strFirstHalf, () => Rating, out bool blnIsSuccess);
-                            strReturn = blnIsSuccess
-                                ? decValue.ToString("#,0.##", GlobalSettings.CultureInfo)
-                                : strFirstHalf;
-                        }
-                        else
-                            strReturn = decValue.ToString("#,0.##", GlobalSettings.CultureInfo);
+                        decValue = ProcessRatingStringAsDec(strFirstHalf, () => Rating, out bool blnIsSuccess);
+                        strReturn = blnIsSuccess
+                            ? decValue.ToString("#,0.##", objCulture)
+                            : strFirstHalf;
                     }
+                    else
+                        strReturn = decValue.ToString("#,0.##", objCulture);
+                }
 
-                    if (blnSquareBrackets)
-                        strReturn = '[' + strReturn + ']';
-                    if (!string.IsNullOrEmpty(strSecondHalf))
-                        strReturn += '/' + strSecondHalf;
+                if (blnSquareBrackets)
+                    strReturn = '[' + strReturn + ']';
+                if (!string.IsNullOrEmpty(strSecondHalf))
+                    strReturn += '/' + strSecondHalf;
+            }
+            else
+            {
+                // If the Capacity is determined by the Rating, evaluate the expression.
+                // XPathExpression cannot evaluate while there are square brackets, so remove them if necessary.
+                bool blnSquareBrackets = strReturn.StartsWith('[');
+                if (blnSquareBrackets)
+                    strReturn = strReturn.Substring(1, strReturn.Length - 2);
+
+                if (strReturn.DoesNeedXPathProcessingToBeConvertedToNumber(out decimal decReturn))
+                {
+                    decReturn = ProcessRatingStringAsDec(strReturn, () => Rating, out bool blnIsSuccess);
+                    if (blnIsSuccess)
+                        strReturn = Math.Max(decReturn, 1.0m).ToString("#,0.##", objCulture);
                 }
                 else
                 {
-                    // If the Capacity is determined by the Rating, evaluate the expression.
-                    // XPathExpression cannot evaluate while there are square brackets, so remove them if necessary.
-                    bool blnSquareBrackets = strReturn.StartsWith('[');
-                    if (blnSquareBrackets)
-                        strReturn = strReturn.Substring(1, strReturn.Length - 2);
-
-                    if (strReturn.DoesNeedXPathProcessingToBeConvertedToNumber(out decimal decReturn))
-                    {
-                        decReturn = ProcessRatingStringAsDec(strReturn, () => Rating, out bool blnIsSuccess);
-                        if (blnIsSuccess)
-                            strReturn = Math.Max(decReturn, 1.0m).ToString("#,0.##", GlobalSettings.CultureInfo);
-                    }
-                    else
-                    {
-                        // Just a straight Capacity, so return the value.
-                        strReturn = decReturn.ToString("#,0.##", GlobalSettings.CultureInfo);
-                    }
-
-                    if (blnSquareBrackets)
-                        strReturn = '[' + strReturn + ']';
+                    // Just a straight Capacity, so return the value.
+                    strReturn = decReturn.ToString("#,0.##", objCulture);
                 }
 
-                return strReturn;
+                if (blnSquareBrackets)
+                    strReturn = '[' + strReturn + ']';
             }
+
+            return strReturn;
         }
 
         /// <summary>
         /// Calculated Capacity of the Gear.
         /// </summary>
-        public async Task<string> GetCalculatedCapacityAsync(CancellationToken token = default)
+        public Task<string> GetCalculatedCapacityAsync(CancellationToken token = default)
+        {
+            return GetCalculatedCapacityAsync(GlobalSettings.CultureInfo, token);
+        }
+
+        /// <summary>
+        /// Calculated Capacity of the Gear.
+        /// </summary>
+        public async Task<string> GetCalculatedCapacityAsync(CultureInfo objCulture, CancellationToken token = default)
         {
             token.ThrowIfCancellationRequested();
             string strReturn = Capacity;
             if (string.IsNullOrEmpty(strReturn))
-                return 0.0m.ToString("#,0.##", GlobalSettings.CultureInfo);
+                return 0.0m.ToString("#,0.##", objCulture);
             strReturn = await strReturn.ProcessFixedValuesStringAsync(() => GetRatingAsync(token), token).ConfigureAwait(false);
 
             int intPos = strReturn.IndexOf("/[", StringComparison.Ordinal);
@@ -4246,11 +4339,11 @@ namespace Chummer.Backend.Equipment
                         bool blnIsSuccess;
                         (decValue, blnIsSuccess) = await ProcessRatingStringAsDecAsync(strFirstHalf, () => GetRatingAsync(token), token).ConfigureAwait(false);
                         strReturn = blnIsSuccess
-                            ? decValue.ToString("#,0.##", GlobalSettings.CultureInfo)
+                            ? decValue.ToString("#,0.##", objCulture)
                             : strFirstHalf;
                     }
                     else
-                        strReturn = decValue.ToString("#,0.##", GlobalSettings.CultureInfo);
+                        strReturn = decValue.ToString("#,0.##", objCulture);
                 }
 
                 if (blnSquareBrackets)
@@ -4271,12 +4364,12 @@ namespace Chummer.Backend.Equipment
                     bool blnIsSuccess;
                     (decReturn, blnIsSuccess) = await ProcessRatingStringAsDecAsync(strReturn, () => GetRatingAsync(token), token).ConfigureAwait(false);
                     if (blnIsSuccess)
-                        strReturn = Math.Max(decReturn, 1.0m).ToString("#,0.##", GlobalSettings.CultureInfo);
+                        strReturn = Math.Max(decReturn, 1.0m).ToString("#,0.##", objCulture);
                 }
                 else
                 {
                     // Just a straight Capacity, so return the value.
-                    strReturn = decReturn.ToString("#,0.##", GlobalSettings.CultureInfo);
+                    strReturn = decReturn.ToString("#,0.##", objCulture);
                 }
 
                 if (blnSquareBrackets)
@@ -4289,76 +4382,83 @@ namespace Chummer.Backend.Equipment
         /// <summary>
         /// Calculated Capacity of the Gear when attached to Armor.
         /// </summary>
-        public string CalculatedArmorCapacity
+        public string CalculatedArmorCapacity => GetCalculatedArmorCapacity(GlobalSettings.CultureInfo);
+
+        public string GetCalculatedArmorCapacity(CultureInfo objCulture)
         {
-            get
+            string strReturn = ArmorCapacity;
+            if (string.IsNullOrEmpty(strReturn))
+                return 0.ToString(objCulture);
+            int intPos = strReturn.IndexOf("/[", StringComparison.Ordinal);
+            if (intPos != -1)
             {
-                string strReturn = ArmorCapacity;
-                if (string.IsNullOrEmpty(strReturn))
-                    return 0.ToString(GlobalSettings.CultureInfo);
-                int intPos = strReturn.IndexOf("/[", StringComparison.Ordinal);
-                if (intPos != -1)
-                {
-                    string strFirstHalf = strReturn.Substring(0, intPos);
-                    string strSecondHalf = strReturn.Substring(intPos + 1);
-                    bool blnSquareBrackets = strFirstHalf.StartsWith('[');
-                    if (blnSquareBrackets && strFirstHalf.Length > 2)
-                        strFirstHalf = strFirstHalf.Substring(1, strFirstHalf.Length - 2);
+                string strFirstHalf = strReturn.Substring(0, intPos);
+                string strSecondHalf = strReturn.Substring(intPos + 1);
+                bool blnSquareBrackets = strFirstHalf.StartsWith('[');
+                if (blnSquareBrackets && strFirstHalf.Length > 2)
+                    strFirstHalf = strFirstHalf.Substring(1, strFirstHalf.Length - 2);
 
-                    if (strFirstHalf == "[*]")
-                        strReturn = "*";
-                    else
-                    {
-                        strFirstHalf = strFirstHalf.ProcessFixedValuesString(() => Rating);
-
-                        if (strFirstHalf.DoesNeedXPathProcessingToBeConvertedToNumber(out decimal decValue))
-                        {
-                            decValue = ProcessRatingStringAsDec(strFirstHalf, () => Rating, out bool blnIsSuccess);
-                            strReturn = blnIsSuccess
-                                ? decValue.ToString("#,0.##", GlobalSettings.CultureInfo)
-                                : strFirstHalf;
-                        }
-                        else
-                            strReturn = decValue.ToString("#,0.##", GlobalSettings.CultureInfo);
-                    }
-
-                    if (blnSquareBrackets)
-                        strReturn = '[' + strReturn + ']';
-                    strReturn += '/' + strSecondHalf;
-                }
-                else if (strReturn.DoesNeedXPathProcessingToBeConvertedToNumber(out decimal decReturn))
-                {
-                    // If the Capacity is determined by the Rating, evaluate the expression.
-                    // XPathExpression cannot evaluate while there are square brackets, so remove them if necessary.
-                    bool blnSquareBrackets = strReturn.StartsWith('[');
-                    if (blnSquareBrackets)
-                        strReturn = strReturn.Substring(1, strReturn.Length - 2);
-
-                    decReturn = ProcessRatingStringAsDec(strReturn, () => Rating, out bool blnIsSuccess);
-                    if (blnIsSuccess)
-                        strReturn = decReturn.ToString("#,0.##", GlobalSettings.CultureInfo);
-                    if (blnSquareBrackets)
-                        strReturn = '[' + strReturn + ']';
-                }
+                if (strFirstHalf == "[*]")
+                    strReturn = "*";
                 else
                 {
-                    // Just a straight Capacity, so return the value.
-                    strReturn = decReturn.ToString("#,0.##", GlobalSettings.CultureInfo);
+                    strFirstHalf = strFirstHalf.ProcessFixedValuesString(() => Rating);
+
+                    if (strFirstHalf.DoesNeedXPathProcessingToBeConvertedToNumber(out decimal decValue))
+                    {
+                        decValue = ProcessRatingStringAsDec(strFirstHalf, () => Rating, out bool blnIsSuccess);
+                        strReturn = blnIsSuccess
+                            ? decValue.ToString("#,0.##", objCulture)
+                            : strFirstHalf;
+                    }
+                    else
+                        strReturn = decValue.ToString("#,0.##", objCulture);
                 }
 
-                return strReturn;
+                if (blnSquareBrackets)
+                    strReturn = '[' + strReturn + ']';
+                strReturn += '/' + strSecondHalf;
             }
+            else if (strReturn.DoesNeedXPathProcessingToBeConvertedToNumber(out decimal decReturn))
+            {
+                // If the Capacity is determined by the Rating, evaluate the expression.
+                // XPathExpression cannot evaluate while there are square brackets, so remove them if necessary.
+                bool blnSquareBrackets = strReturn.StartsWith('[');
+                if (blnSquareBrackets)
+                    strReturn = strReturn.Substring(1, strReturn.Length - 2);
+
+                decReturn = ProcessRatingStringAsDec(strReturn, () => Rating, out bool blnIsSuccess);
+                if (blnIsSuccess)
+                    strReturn = decReturn.ToString("#,0.##", objCulture);
+                if (blnSquareBrackets)
+                    strReturn = '[' + strReturn + ']';
+            }
+            else
+            {
+                // Just a straight Capacity, so return the value.
+                strReturn = decReturn.ToString("#,0.##", objCulture);
+            }
+
+            return strReturn;
         }
 
         /// <summary>
         /// Calculated Capacity of the Gear when attached to Armor.
         /// </summary>
-        public async Task<string> GetCalculatedArmorCapacityAsync(CancellationToken token = default)
+        public Task<string> GetCalculatedArmorCapacityAsync(CancellationToken token = default)
+        {
+            return GetCalculatedArmorCapacityAsync(GlobalSettings.CultureInfo, token);
+        }
+
+        /// <summary>
+        /// Calculated Capacity of the Gear when attached to Armor.
+        /// </summary>
+        public async Task<string> GetCalculatedArmorCapacityAsync(CultureInfo objCulture, CancellationToken token = default)
         {
             token.ThrowIfCancellationRequested();
             string strReturn = ArmorCapacity;
             if (string.IsNullOrEmpty(strReturn))
-                return 0.ToString(GlobalSettings.CultureInfo);
+                return 0.ToString(objCulture);
             strReturn = await strReturn.ProcessFixedValuesStringAsync(() => GetRatingAsync(token), token).ConfigureAwait(false);
             int intPos = strReturn.IndexOf("/[", StringComparison.Ordinal);
             if (intPos != -1)
@@ -4380,11 +4480,11 @@ namespace Chummer.Backend.Equipment
                         bool blnIsSuccess;
                         (decValue, blnIsSuccess) = await ProcessRatingStringAsDecAsync(strFirstHalf, () => GetRatingAsync(token), token).ConfigureAwait(false);
                         strReturn = blnIsSuccess
-                            ? decValue.ToString("#,0.##", GlobalSettings.CultureInfo)
+                            ? decValue.ToString("#,0.##", objCulture)
                             : strFirstHalf;
                     }
                     else
-                        strReturn = decValue.ToString("#,0.##", GlobalSettings.CultureInfo);
+                        strReturn = decValue.ToString("#,0.##", objCulture);
                 }
 
                 if (blnSquareBrackets)
@@ -4401,14 +4501,14 @@ namespace Chummer.Backend.Equipment
                 bool blnIsSuccess;
                 (decReturn, blnIsSuccess) = await ProcessRatingStringAsDecAsync(strReturn, () => GetRatingAsync(token), token).ConfigureAwait(false);
                 if (blnIsSuccess)
-                    strReturn = decReturn.ToString("#,0.##", GlobalSettings.CultureInfo);
+                    strReturn = decReturn.ToString("#,0.##", objCulture);
                 if (blnSquareBrackets)
                     strReturn = '[' + strReturn + ']';
             }
             else
             {
                 // Just a straight Capacity, so return the value.
-                strReturn = decReturn.ToString("#,0.##", GlobalSettings.CultureInfo);
+                strReturn = decReturn.ToString("#,0.##", objCulture);
             }
 
             return strReturn;
@@ -4569,7 +4669,7 @@ namespace Chummer.Backend.Equipment
         {
             get
             {
-                string strCapacity = CalculatedCapacity;
+                string strCapacity = GetCalculatedCapacity(GlobalSettings.InvariantCultureInfo);
                 // If this is a multiple-capacity item, use only the second half.
                 int intPos = strCapacity.IndexOf("/[", StringComparison.Ordinal);
                 if (intPos != -1)
@@ -4579,7 +4679,7 @@ namespace Chummer.Backend.Equipment
 
                 // Only items that contain square brackets should consume Capacity. Everything else is treated as [0].
                 strCapacity = strCapacity.StartsWith('[') ? strCapacity.Substring(1, strCapacity.Length - 2) : "0";
-                return decimal.TryParse(strCapacity, NumberStyles.Any, GlobalSettings.CultureInfo, out decimal decReturn)
+                return decimal.TryParse(strCapacity, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decimal decReturn)
                     ? decReturn
                     : 0;
             }
@@ -4591,7 +4691,7 @@ namespace Chummer.Backend.Equipment
         public async Task<decimal> GetPluginCapacityAsync(CancellationToken token = default)
         {
             token.ThrowIfCancellationRequested();
-            string strCapacity = await GetCalculatedCapacityAsync(token).ConfigureAwait(false);
+            string strCapacity = await GetCalculatedCapacityAsync(GlobalSettings.InvariantCultureInfo, token).ConfigureAwait(false);
             // If this is a multiple-capacity item, use only the second half.
             int intPos = strCapacity.IndexOf("/[", StringComparison.Ordinal);
             if (intPos != -1)
@@ -4601,7 +4701,7 @@ namespace Chummer.Backend.Equipment
 
             // Only items that contain square brackets should consume Capacity. Everything else is treated as [0].
             strCapacity = strCapacity.StartsWith('[') ? strCapacity.Substring(1, strCapacity.Length - 2) : "0";
-            return decimal.TryParse(strCapacity, NumberStyles.Any, GlobalSettings.CultureInfo, out decimal decReturn)
+            return decimal.TryParse(strCapacity, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decimal decReturn)
                 ? decReturn
                 : 0;
         }
@@ -4613,7 +4713,7 @@ namespace Chummer.Backend.Equipment
         {
             get
             {
-                string strCapacity = CalculatedArmorCapacity;
+                string strCapacity = GetCalculatedArmorCapacity(GlobalSettings.InvariantCultureInfo);
                 // If this is a multiple-capacity item, use only the second half.
                 int intPos = strCapacity.IndexOf("/[", StringComparison.Ordinal);
                 if (intPos != -1)
@@ -4623,7 +4723,10 @@ namespace Chummer.Backend.Equipment
 
                 // Only items that contain square brackets should consume Capacity. Everything else is treated as [0].
                 strCapacity = strCapacity.StartsWith('[') ? strCapacity.Substring(1, strCapacity.Length - 2) : "0";
-                return strCapacity == "*" ? 0 : Convert.ToDecimal(strCapacity, GlobalSettings.CultureInfo);
+                if (strCapacity == "*")
+                    return 0;
+                decimal.TryParse(strCapacity, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decimal decReturn);
+                return decReturn;
             }
         }
 
@@ -4633,7 +4736,7 @@ namespace Chummer.Backend.Equipment
         public async Task<decimal> GetPluginArmorCapacityAsync(CancellationToken token = default)
         {
             token.ThrowIfCancellationRequested();
-            string strCapacity = await GetCalculatedArmorCapacityAsync(token).ConfigureAwait(false);
+            string strCapacity = await GetCalculatedArmorCapacityAsync(GlobalSettings.InvariantCultureInfo, token).ConfigureAwait(false);
             // If this is a multiple-capacity item, use only the second half.
             int intPos = strCapacity.IndexOf("/[", StringComparison.Ordinal);
             if (intPos != -1)
@@ -4643,7 +4746,10 @@ namespace Chummer.Backend.Equipment
 
             // Only items that contain square brackets should consume Capacity. Everything else is treated as [0].
             strCapacity = strCapacity.StartsWith('[') ? strCapacity.Substring(1, strCapacity.Length - 2) : "0";
-            return strCapacity == "*" ? 0 : Convert.ToDecimal(strCapacity, GlobalSettings.CultureInfo);
+            if (strCapacity == "*")
+                return 0;
+            decimal.TryParse(strCapacity, NumberStyles.Any, GlobalSettings.InvariantCultureInfo, out decimal decReturn);
+            return decReturn;
         }
 
         /// <summary>
@@ -4654,7 +4760,7 @@ namespace Chummer.Backend.Equipment
             get
             {
                 decimal decCapacity = 0;
-                string strMyCapacity = CalculatedCapacity;
+                string strMyCapacity = GetCalculatedCapacity(GlobalSettings.InvariantCultureInfo);
                 int intPos = strMyCapacity.IndexOf("/[", StringComparison.Ordinal);
                 if (intPos != -1 || !strMyCapacity.Contains('['))
                 {
@@ -4663,11 +4769,11 @@ namespace Chummer.Backend.Equipment
                     {
                         // If this is a multiple-capacity item, use only the first half.
                         strMyCapacity = strMyCapacity.Substring(0, intPos);
-                        if (!decimal.TryParse(strMyCapacity, NumberStyles.Any, GlobalSettings.CultureInfo,
+                        if (!decimal.TryParse(strMyCapacity, NumberStyles.Any, GlobalSettings.InvariantCultureInfo,
                             out decCapacity))
                             decCapacity = 0;
                     }
-                    else if (!decimal.TryParse(strMyCapacity, NumberStyles.Any, GlobalSettings.CultureInfo,
+                    else if (!decimal.TryParse(strMyCapacity, NumberStyles.Any, GlobalSettings.InvariantCultureInfo,
                         out decCapacity))
                         decCapacity = 0;
 
@@ -4689,7 +4795,7 @@ namespace Chummer.Backend.Equipment
         {
             token.ThrowIfCancellationRequested();
             decimal decCapacity = 0;
-            string strMyCapacity = await GetCalculatedCapacityAsync(token).ConfigureAwait(false);
+            string strMyCapacity = await GetCalculatedCapacityAsync(GlobalSettings.InvariantCultureInfo, token).ConfigureAwait(false);
             int intPos = strMyCapacity.IndexOf("/[", StringComparison.Ordinal);
             if (intPos != -1 || !strMyCapacity.Contains('['))
             {
@@ -4698,11 +4804,11 @@ namespace Chummer.Backend.Equipment
                 {
                     // If this is a multiple-capacity item, use only the first half.
                     strMyCapacity = strMyCapacity.Substring(0, intPos);
-                    if (!decimal.TryParse(strMyCapacity, NumberStyles.Any, GlobalSettings.CultureInfo,
+                    if (!decimal.TryParse(strMyCapacity, NumberStyles.Any, GlobalSettings.InvariantCultureInfo,
                             out decCapacity))
                         decCapacity = 0;
                 }
-                else if (!decimal.TryParse(strMyCapacity, NumberStyles.Any, GlobalSettings.CultureInfo,
+                else if (!decimal.TryParse(strMyCapacity, NumberStyles.Any, GlobalSettings.InvariantCultureInfo,
                              out decCapacity))
                     decCapacity = 0;
 
@@ -4818,6 +4924,8 @@ namespace Chummer.Backend.Equipment
                 strReturn += strSpace + '(' + _objCharacter.TranslateExtra(Extra, strLanguage) + ')';
             if (!string.IsNullOrEmpty(GearName))
                 strReturn += strSpace + "(\"" + GearName + "\")";
+            if ((Category == "Foci" || Category == "Metamagic Foci") && Bonded)
+                strReturn += strSpace + '(' + LanguageManager.GetString("Label_BondedFoci", strLanguage) + ')';
             if (LoadedIntoClip != null)
             {
                 if (objCulture == null)
@@ -4837,7 +4945,6 @@ namespace Chummer.Backend.Equipment
             string strSpace = await LanguageManager.GetStringAsync("String_Space", strLanguage, token: token).ConfigureAwait(false);
             if (!string.IsNullOrEmpty(strQuantity))
                 strReturn = strQuantity + strSpace + strReturn;
-
             int intRating = await GetRatingAsync(token).ConfigureAwait(false);
             if (intRating > 0)
             {
@@ -4857,6 +4964,8 @@ namespace Chummer.Backend.Equipment
                 strReturn += strSpace + '(' + await _objCharacter.TranslateExtraAsync(Extra, strLanguage, token: token).ConfigureAwait(false) + ')';
             if (!string.IsNullOrEmpty(GearName))
                 strReturn += strSpace + "(\"" + GearName + "\")";
+            if ((Category == "Foci" || Category == "Metamagic Foci") && Bonded)
+                strReturn += strSpace + '(' + await LanguageManager.GetStringAsync("Label_BondedFoci", strLanguage, token: token).ConfigureAwait(false) + ')';
             if (LoadedIntoClip != null)
             {
                 if (objCulture == null)
@@ -6722,10 +6831,20 @@ namespace Chummer.Backend.Equipment
                 {
                     token.ThrowIfCancellationRequested();
                     Gear objPlugin = new Gear(_objCharacter);
-                    if (objPlugin.ImportHeroLabGear(xmlPluginToAdd, this.GetNode(token), lstWeapons, token))
+                    try
                     {
-                        objPlugin.Parent = this;
-                        Children.Add(objPlugin);
+                        if (objPlugin.ImportHeroLabGear(xmlPluginToAdd, this.GetNode(token), lstWeapons, token))
+                        {
+                            objPlugin.Parent = this;
+                            Children.Add(objPlugin);
+                        }
+                        else
+                            objPlugin.DeleteGear();
+                    }
+                    catch
+                    {
+                        objPlugin.DeleteGear();
+                        throw;
                     }
                 }
 
@@ -6761,10 +6880,20 @@ namespace Chummer.Backend.Equipment
                              "/item[@useradded != \"no\"]"))
                 {
                     Gear objPlugin = new Gear(_objCharacter);
-                    if (await objPlugin.ImportHeroLabGearAsync(xmlPluginToAdd, await this.GetNodeAsync(token: token).ConfigureAwait(false), lstWeapons, token).ConfigureAwait(false))
+                    try
                     {
-                        objPlugin.Parent = this;
-                        await Children.AddAsync(objPlugin, token).ConfigureAwait(false);
+                        if (await objPlugin.ImportHeroLabGearAsync(xmlPluginToAdd, await this.GetNodeAsync(token: token).ConfigureAwait(false), lstWeapons, token).ConfigureAwait(false))
+                        {
+                            objPlugin.Parent = this;
+                            await Children.AddAsync(objPlugin, token).ConfigureAwait(false);
+                        }
+                        else
+                            await objPlugin.DeleteGearAsync(token: token).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        await objPlugin.DeleteGearAsync(token: CancellationToken.None).ConfigureAwait(false);
+                        throw;
                     }
                 }
 

@@ -768,12 +768,25 @@ namespace Chummer.Backend.Equipment
                             token).ConfigureAwait(false);
                     await objWriter
                         .WriteElementStringAsync(
+                            "name_english", Name,
+                            token).ConfigureAwait(false);
+                    await objWriter
+                        .WriteElementStringAsync(
                             "fullname", await DisplayNameAsync(strLanguageToPrint, token).ConfigureAwait(false),
+                            token).ConfigureAwait(false);
+                    await objWriter
+                        .WriteElementStringAsync(
+                            "fullname_english", await DisplayNameAsync(GlobalSettings.DefaultLanguage, token).ConfigureAwait(false),
                             token).ConfigureAwait(false);
                     await objWriter
                         .WriteElementStringAsync("formattedname",
                             await FormattedDisplayNameAsync(
                                 objCulture, strLanguageToPrint, token).ConfigureAwait(false),
+                            token).ConfigureAwait(false);
+                    await objWriter
+                        .WriteElementStringAsync("formattedname_english",
+                            await FormattedDisplayNameAsync(
+                                GlobalSettings.InvariantCultureInfo, GlobalSettings.DefaultLanguage, token).ConfigureAwait(false),
                             token).ConfigureAwait(false);
                     await objWriter
                         .WriteElementStringAsync(
@@ -2478,9 +2491,15 @@ namespace Chummer.Backend.Equipment
             }
         }
 
+        private int _intIsDisposed;
+
+        public bool IsDisposed => _intIsDisposed > 0;
+
         /// <inheritdoc />
         public void Dispose()
         {
+            if (Interlocked.CompareExchange(ref _intIsDisposed, 1, 0) > 0)
+                return;
             using (LockObject.EnterWriteLock())
                 Utils.StringHashSetPool.Return(ref _setAllowedFreeLifestyles);
         }
@@ -2488,6 +2507,8 @@ namespace Chummer.Backend.Equipment
         /// <inheritdoc />
         public async ValueTask DisposeAsync()
         {
+            if (Interlocked.CompareExchange(ref _intIsDisposed, 1, 0) > 0)
+                return;
             IAsyncDisposable objLocker = await LockObject.EnterWriteLockAsync().ConfigureAwait(false);
             try
             {
